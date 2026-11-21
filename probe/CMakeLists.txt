@@ -1,0 +1,5 @@
+set(TARGET llama-inkling-probe)
+add_executable(${TARGET} inkling-probe.cpp)
+target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/tools/mtmd)
+target_link_libraries(${TARGET} PRIVATE llama-common mtmd Threads::Threads)
+target_compile_features(${TARGET} PRIVATE cxx_std_17)

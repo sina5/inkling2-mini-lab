@@ -1,0 +1,52 @@
+diff --git a/src/models/inkling2.cpp b/src/models/inkling2.cpp
+index 3e43ef418..c7d581d89 100644
+--- a/src/models/inkling2.cpp
++++ b/src/models/inkling2.cpp
+@@ -237,12 +237,15 @@ ggml_tensor * llama_model_inkling2::graph::convolve(
+ }
+ 
+ // mix a cross-pass message into a looped layer input: (1 - forget)*cur + gain*message, both gated on cur and message
+-ggml_tensor * llama_model_inkling2::graph::control(ggml_tensor * cur, ggml_tensor * message, const loop_layer & loop, int ctrl) {
++ggml_tensor * llama_model_inkling2::graph::control(ggml_tensor * cur, ggml_tensor * message, const loop_layer & loop, int ctrl, int il) {
+     ggml_tensor * gate = ggml_concat(ctx0, ggml_rms_norm(ctx0, cur, 1e-6f), ggml_rms_norm(ctx0, message, 1e-6f), 0);
+     gate = build_lora_mm(loop.ctrl_down[ctrl], gate);
+ 
+     ggml_tensor * gain   = ggml_tanh(ctx0, build_lora_mm(loop.ctrl_gain[ctrl],   gate));
+     ggml_tensor * forget = ggml_tanh(ctx0, build_lora_mm(loop.ctrl_forget[ctrl], gate));
++    // probe names: loop_gain_<ctrl>-<il> and loop_forget_<ctrl>-<il>
++    ggml_format_name(gain,   "loop_gain_%d-%d",   ctrl, il);
++    ggml_format_name(forget, "loop_forget_%d-%d", ctrl, il);
+ 
+     return ggml_add(ctx0, ggml_sub(ctx0, cur, ggml_mul(ctx0, forget, cur)), ggml_mul(ctx0, gain, message));
+ }
+@@ -305,7 +308,7 @@ ggml_tensor * llama_model_inkling2::graph::build_layer(int il, int ip, ggml_tens
+     if (messages) {
+         // the messages make the Q, K and V inputs of a SWA layer differ
+         for (int j = 0; j < 3; ++j) {
+-            inputs[j] = control(inputs[j], message(LOOP_CTRL_Q + j), *loop, LOOP_CTRL_Q + j);
++            inputs[j] = control(inputs[j], message(LOOP_CTRL_Q + j), *loop, LOOP_CTRL_Q + j, il);
+         }
+     }
+ 
+@@ -389,7 +392,7 @@ ggml_tensor * llama_model_inkling2::graph::build_layer(int il, int ip, ggml_tens
+     // MoE
+     cur = ggml_reshape_2d(ctx0, mix(blocks, cur, layer.ffn_res_query), n_embd, n_tokens);
+     if (messages) {
+-        cur = control(cur, message(LOOP_CTRL_FFN), *loop, LOOP_CTRL_FFN);
++        cur = control(cur, message(LOOP_CTRL_FFN), *loop, LOOP_CTRL_FFN, il);
+     }
+     cur = build_norm(cur, layer.ffn_norm, nullptr, LLM_NORM_RMS, il);
+ 
+diff --git a/src/models/models.h b/src/models/models.h
+index 636afeae9..906d3a6c3 100644
+--- a/src/models/models.h
++++ b/src/models/models.h
+@@ -2517,7 +2517,7 @@ struct llama_model_inkling2 : public llama_model_base {
+                 ggml_tensor * history,
+                 llm_graph_input_rs * inp,
+                 int64_t offset);
+-        ggml_tensor * control(ggml_tensor * cur, ggml_tensor * message, const loop_layer & loop, int ctrl);
++        ggml_tensor * control(ggml_tensor * cur, ggml_tensor * message, const loop_layer & loop, int ctrl, int il);
+ 
+     protected:
+         // the helpers alone, a derived graph builds its own body
